@@ -72,7 +72,6 @@ app.get("/checkcode", (req, res) => {
         message: "Code is valid and bound to correct HWID",
         user: codeData.username,
         boundAt: new Date(codeData.timestamp).toISOString(),
-        serverIP: SERVER_IP,
       })
     } else if (codeData.hwid === null) {
       // Code exists but not bound yet - bind it now
@@ -87,7 +86,6 @@ app.get("/checkcode", (req, res) => {
         message: "Code validated and bound to HWID",
         user: codeData.username,
         boundAt: new Date().toISOString(),
-        serverIP: SERVER_IP,
       })
     } else {
       console.log(`❌ Server validation failed - HWID mismatch for code ${code}`)
@@ -115,8 +113,6 @@ app.get("/health", (req, res) => {
     activeCodes: activeCodes.size,
     boundComputers: usedHWIDs.size,
     port: PORT,
-    serverIP: SERVER_IP,
-    endpoint: `http://${SERVER_IP}:${PORT}`,
   })
 })
 
@@ -125,9 +121,7 @@ app.get("/test", (req, res) => {
   res.json({
     message: "vQuick Discord Bot Server is running!",
     port: PORT,
-    serverIP: SERVER_IP,
     timestamp: new Date().toISOString(),
-    testUrl: `http://${SERVER_IP}:${PORT}/checkcode?code=TEST&hwid=123`,
     accessibleFrom: "external clients",
   })
 })
@@ -146,7 +140,17 @@ app.listen(PORT, "0.0.0.0", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return
 
-  // Get code command
+  // OWNER-ONLY CHECK FOR ALL COMMANDS
+  if (interaction.user.id !== OWNER_DISCORD_ID) {
+    await interaction.reply({
+      content: "❌ **Access Denied**\n\nYou're not the owner of this bot. Don't do that!",
+      ephemeral: true,
+    })
+    console.log(`🚫 Unauthorized access attempt by ${interaction.user.username} (${interaction.user.id})`)
+    return
+  }
+
+  // Get code command - NOW OWNER ONLY
   if (interaction.commandName === "getcode") {
     const userId = interaction.user.id
     const username = interaction.user.username
@@ -168,9 +172,7 @@ client.on("interactionCreate", async (interaction) => {
 
 ⚠️ **Important:** If you use this code on a different computer, it will be permanently bound to that device instead.
 
-🔍 **Server Validation:** Your access is validated every 30 seconds.
-
-🌐 **Server:** ${SERVER_IP}:${PORT}`,
+🔍 **Server Validation:** Your access is validated every 30 seconds.`,
         ephemeral: true,
       })
       console.log(`🔄 User ${username} requested existing code: ${existingCode}`)
@@ -199,16 +201,14 @@ client.on("interactionCreate", async (interaction) => {
 
 🔍 **Server Validation:** Your access will be validated every 30 seconds.
 
-⚠️ **Security Notice:** Keep this code private. It cannot be shared between computers.
-
-🌐 **Server:** ${SERVER_IP}:${PORT}`,
+⚠️ **Security Notice:** Keep this code private. It cannot be shared between computers.`,
       ephemeral: true,
     })
 
     console.log(`🎫 New code generated: ${newCode} for user ${username} (${userId})`)
   }
 
-  // Verify code command (used by vQuick app)
+  // Verify code command (used by vQuick app) - NOW OWNER ONLY
   if (interaction.commandName === "verify") {
     const code = interaction.options.getString("code")
     const hwid = interaction.options.getString("hwid")
@@ -260,8 +260,7 @@ Contact support if you need to reset your computer's binding.`,
 Your vQuick access has been activated on this computer.
 
 🔒 **Security:** This code is now permanently bound to this computer.
-🔍 **Server Validation:** Your access will be validated every 30 seconds.
-🌐 **Server:** ${SERVER_IP}:${PORT}`,
+🔍 **Server Validation:** Your access will be validated every 30 seconds.`,
         ephemeral: true,
       })
 
@@ -281,105 +280,81 @@ Please get a new code with \`/getcode\``,
 
   // Stats command - only for bot owner
   if (interaction.commandName === "stats") {
-    if (interaction.user.id === OWNER_DISCORD_ID) {
-      const totalCodes = activeCodes.size
-      const usedCodes = Array.from(activeCodes.values()).filter((data) => data.isUsed).length
-      const boundComputers = usedHWIDs.size
+    const totalCodes = activeCodes.size
+    const usedCodes = Array.from(activeCodes.values()).filter((data) => data.isUsed).length
+    const boundComputers = usedHWIDs.size
 
-      await interaction.reply({
-        content: `📊 **vQuick Bot Statistics**
+    await interaction.reply({
+      content: `📊 **vQuick Bot Statistics**
 
 👥 Unique users: ${totalCodes}
 🎫 Used codes: ${usedCodes}
 💻 Bound computers: ${boundComputers}
 🔒 HWID protection: ENABLED
 🔍 Server validation: ACTIVE (Port ${PORT})
-🌐 Server URL: http://${SERVER_IP}:${PORT}/checkcode
 📡 External access: ENABLED`,
-        ephemeral: true,
-      })
-    } else {
-      await interaction.reply({
-        content: "❌ You don't have permission to use this command.",
-        ephemeral: true,
-      })
-    }
+      ephemeral: true,
+    })
   }
 
   // List codes command - only for bot owner
   if (interaction.commandName === "listcodes") {
-    if (interaction.user.id === OWNER_DISCORD_ID) {
-      if (activeCodes.size === 0) {
-        await interaction.reply({
-          content: "📝 **No active codes found**",
-          ephemeral: true,
-        })
-        return
-      }
-
-      let codeList = "📝 **Active Authentication Codes:**\n```\n"
-      let count = 0
-      for (const [code, data] of activeCodes.entries()) {
-        if (count >= 10) {
-          codeList += `... and ${activeCodes.size - 10} more\n`
-          break
-        }
-        const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
-        const status = data.isUsed ? `🔒 BOUND` : `🔓 FREE`
-        const hwidInfo = data.hwid ? ` (${data.hwid.substring(0, 8)}...)` : ``
-        codeList += `${code} - ${data.username} (${timeAgo}m ago) ${status}${hwidInfo}\n`
-        count++
-      }
-      codeList += "```"
-      codeList += `\n🌐 Server: ${SERVER_IP}:${PORT}`
-
+    if (activeCodes.size === 0) {
       await interaction.reply({
-        content: codeList,
+        content: "📝 **No active codes found**",
         ephemeral: true,
       })
-    } else {
-      await interaction.reply({
-        content: "❌ You don't have permission to use this command.",
-        ephemeral: true,
-      })
+      return
     }
+
+    let codeList = "📝 **Active Authentication Codes:**\n```\n"
+    let count = 0
+    for (const [code, data] of activeCodes.entries()) {
+      if (count >= 10) {
+        codeList += `... and ${activeCodes.size - 10} more\n`
+        break
+      }
+      const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
+      const status = data.isUsed ? `🔒 BOUND` : `🔓 FREE`
+      const hwidInfo = data.hwid ? ` (${data.hwid.substring(0, 8)}...)` : ``
+      codeList += `${code} - ${data.username} (${timeAgo}m ago) ${status}${hwidInfo}\n`
+      count++
+    }
+    codeList += "```"
+
+    await interaction.reply({
+      content: codeList,
+      ephemeral: true,
+    })
   }
 
   // Revoke code command
   if (interaction.commandName === "revoke") {
-    if (interaction.user.id === OWNER_DISCORD_ID) {
-      const codeToRevoke = interaction.options.getString("code")
+    const codeToRevoke = interaction.options.getString("code")
 
-      if (activeCodes.has(codeToRevoke)) {
-        const userData = activeCodes.get(codeToRevoke)
+    if (activeCodes.has(codeToRevoke)) {
+      const userData = activeCodes.get(codeToRevoke)
 
-        // Remove HWID from used set if it was bound
-        if (userData.hwid) {
-          usedHWIDs.delete(userData.hwid)
-          console.log(`🔓 HWID ${userData.hwid} freed from revoked code`)
-        }
+      // Remove HWID from used set if it was bound
+      if (userData.hwid) {
+        usedHWIDs.delete(userData.hwid)
+        console.log(`🔓 HWID ${userData.hwid} freed from revoked code`)
+      }
 
-        activeCodes.delete(codeToRevoke)
+      activeCodes.delete(codeToRevoke)
 
-        await interaction.reply({
-          content: `✅ **Code revoked:** \`${codeToRevoke}\` (was owned by ${userData.username})
+      await interaction.reply({
+        content: `✅ **Code revoked:** \`${codeToRevoke}\` (was owned by ${userData.username})
 ${userData.hwid ? `🔓 Computer unbound and available for new codes` : ""}
 
-🔍 **Server Validation:** Users with this code will be automatically logged out within 30 seconds.
-🌐 **Server:** ${SERVER_IP}:${PORT}`,
-          ephemeral: true,
-        })
+🔍 **Server Validation:** Users with this code will be automatically logged out within 30 seconds.`,
+        ephemeral: true,
+      })
 
-        console.log(`🗑️ Code ${codeToRevoke} revoked by owner`)
-      } else {
-        await interaction.reply({
-          content: `❌ **Code not found:** \`${codeToRevoke}\``,
-          ephemeral: true,
-        })
-      }
+      console.log(`🗑️ Code ${codeToRevoke} revoked by owner`)
     } else {
       await interaction.reply({
-        content: "❌ You don't have permission to use this command.",
+        content: `❌ **Code not found:** \`${codeToRevoke}\``,
         ephemeral: true,
       })
     }
@@ -388,11 +363,11 @@ ${userData.hwid ? `🔓 Computer unbound and available for new codes` : ""}
 
 // Register slash commands
 const commands = [
-  new SlashCommandBuilder().setName("getcode").setDescription("Get your vQuick authentication code (HWID protected)"),
+  new SlashCommandBuilder().setName("getcode").setDescription("Get your vQuick authentication code (Owner only)"),
 
   new SlashCommandBuilder()
     .setName("verify")
-    .setDescription("Verify code with HWID (used by vQuick app)")
+    .setDescription("Verify code with HWID (Owner only)")
     .addStringOption((option) => option.setName("code").setDescription("The 6-character code").setRequired(true))
     .addStringOption((option) => option.setName("hwid").setDescription("Hardware ID").setRequired(true)),
 
@@ -413,9 +388,9 @@ const rest = new REST({ version: "10" }).setToken(TOKEN)
 // Register commands
 async function registerCommands() {
   try {
-    console.log("🔄 Started refreshing HWID-protected commands with server validation.")
+    console.log("🔄 Started refreshing OWNER-ONLY commands with server validation.")
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands })
-    console.log("✅ Successfully registered HWID-protected commands with server validation.")
+    console.log("✅ Successfully registered OWNER-ONLY commands with server validation.")
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] })
     console.log("🧹 Cleared global commands.")
   } catch (error) {
