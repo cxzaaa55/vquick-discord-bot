@@ -1,10 +1,19 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } = require("discord.js")
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require("discord.js")
 
 // Configuration - REPLACE WITH YOUR VALUES
 const TOKEN = process.env.DISCORD_TOKEN || "YOUR_TOKEN_GOES_HERE"
 const CLIENT_ID = process.env.CLIENT_ID || "1382531848256753856"
 const GUILD_ID = process.env.GUILD_ID || "1282223482100383795"
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID || "947113654300573756"
+
+// Role ID that can use the /say command
+const ADMIN_ROLE_ID = "1282223482217955366"
+
+// Channels where /info command is not allowed
+const RESTRICTED_CHANNELS = ["1382631053864472647", "1382631148005494868", "1382630751903682571"]
+
+// Cooldown tracking for /info command
+const cooldowns = new Map()
 
 // Express server for HTTP endpoints - CONFIGURED FOR REMOTE ACCESS
 const express = require("express")
@@ -140,13 +149,102 @@ app.listen(PORT, "0.0.0.0", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return
 
-  // OWNER-ONLY CHECK FOR ALL COMMANDS
-  if (interaction.user.id !== OWNER_DISCORD_ID) {
+  // Handle commands that are restricted to specific user ID
+  if (["revoke", "listcodes", "stats", "verify"].includes(interaction.commandName)) {
+    if (interaction.user.id !== OWNER_DISCORD_ID) {
+      await interaction.reply({
+        content: "❌ **Access Denied**\n\nYou don't have permission to use this command.",
+        ephemeral: true,
+      })
+      console.log(
+        `🚫 Unauthorized access attempt to ${interaction.commandName} by ${interaction.user.username} (${interaction.user.id})`,
+      )
+      return
+    }
+  }
+
+  // Handle /info command with cooldown and channel restrictions
+  if (interaction.commandName === "info") {
+    // Check if command is used in a restricted channel
+    if (RESTRICTED_CHANNELS.includes(interaction.channelId)) {
+      await interaction.reply({
+        content: "❌ This command cannot be used in this channel.",
+        ephemeral: true,
+      })
+      return
+    }
+
+    // Check for cooldown
+    const now = Date.now()
+    const cooldownTime = 10000 // 10 seconds in milliseconds
+
+    if (cooldowns.has(interaction.user.id)) {
+      const expirationTime = cooldowns.get(interaction.user.id) + cooldownTime
+
+      if (now < expirationTime) {
+        const timeLeft = (expirationTime - now) / 1000
+        await interaction.reply({
+          content: `⏳ Please wait ${timeLeft.toFixed(1)} more seconds before using this command again.`,
+          ephemeral: true,
+        })
+        return
+      }
+    }
+
+    // Set cooldown
+    cooldowns.set(interaction.user.id, now)
+    setTimeout(() => cooldowns.delete(interaction.user.id), cooldownTime)
+
+    // Send info message
     await interaction.reply({
-      content: "❌ **Access Denied**\n\nYou're not the owner of this bot. Don't do that!",
-      ephemeral: true,
+      content: `**Hello! You are interested in vQuick? Here are the payment methods:**
+
+1: Cashapp 
+   - 18+ txpww 
+   - 18- cxshdirty
+
+2: Robux
+   - https://www.roblox.com/game-pass/1257913149/vquick
+
+3: LTC (Litecoin)
+   - You must wait for an owner to respond.`,
     })
-    console.log(`🚫 Unauthorized access attempt by ${interaction.user.username} (${interaction.user.id})`)
+    return
+  }
+
+  // Handle /say command with role restriction
+  if (interaction.commandName === "say") {
+    // Check if user has the required role
+    const member = interaction.member
+    if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
+      await interaction.reply({
+        content: "❌ **Access Denied**\n\nYou don't have the required role to use this command.",
+        ephemeral: true,
+      })
+      return
+    }
+
+    const message = interaction.options.getString("message")
+    const channelId = interaction.options.getChannel("channel").id
+
+    try {
+      const channel = await client.channels.fetch(channelId)
+      await channel.send(message)
+
+      await interaction.reply({
+        content: `✅ Message sent to <#${channelId}> successfully!`,
+        ephemeral: true,
+      })
+
+      console.log(`📢 Message sent by ${interaction.user.username} to channel ${channelId}`)
+    } catch (error) {
+      console.error(`❌ Error sending message to channel ${channelId}:`, error)
+      await interaction.reply({
+        content: `❌ Failed to send message: ${error.message}`,
+        ephemeral: true,
+      })
+    }
+
     return
   }
 
@@ -381,6 +479,20 @@ const commands = [
     .addStringOption((option) =>
       option.setName("code").setDescription("The 6-character code to revoke").setRequired(true),
     ),
+
+  // NEW: Say command for users with specific role
+  new SlashCommandBuilder()
+    .setName("say")
+    .setDescription("Send a message to a specific channel")
+    .addStringOption((option) => option.setName("message").setDescription("The message to send").setRequired(true))
+    .addChannelOption((option) =>
+      option.setName("channel").setDescription("The channel to send the message to").setRequired(true),
+    ),
+
+  // NEW: Info command with payment information
+  new SlashCommandBuilder()
+    .setName("info")
+    .setDescription("Get information about vQuick payment methods"),
 ]
 
 const rest = new REST({ version: "10" }).setToken(TOKEN)
@@ -388,9 +500,9 @@ const rest = new REST({ version: "10" }).setToken(TOKEN)
 // Register commands
 async function registerCommands() {
   try {
-    console.log("🔄 Started refreshing OWNER-ONLY commands with server validation.")
+    console.log("🔄 Started refreshing commands.")
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), { body: commands })
-    console.log("✅ Successfully registered OWNER-ONLY commands with server validation.")
+    console.log("✅ Successfully registered commands.")
     await rest.put(Routes.applicationCommands(CLIENT_ID), { body: [] })
     console.log("🧹 Cleared global commands.")
   } catch (error) {
