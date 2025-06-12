@@ -1,25 +1,16 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes, PermissionFlagsBits } = require("discord.js")
+const { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } = require("discord.js")
 
-// Configuration - REPLACE WITH YOUR VALUES
-const TOKEN = process.env.DISCORD_TOKEN || "YOUR_TOKEN_GOES_HERE"
-const CLIENT_ID = process.env.CLIENT_ID || "1382531848256753856"
-const GUILD_ID = process.env.GUILD_ID || "1282223482100383795"
-const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID || "947113654300573756"
+// Configuration - Using environment variables
+const TOKEN = process.env.DISCORD_TOKEN
+const CLIENT_ID = process.env.CLIENT_ID
+const GUILD_ID = process.env.GUILD_ID
+const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID
+const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID || "0" // Default to "0" if not set
 
-// Role ID that can use the /say command
-const ADMIN_ROLE_ID = "1282223482217955366"
-
-// Channels where /info command is not allowed
-const RESTRICTED_CHANNELS = ["1382631053864472647", "1382631148005494868", "1382630751903682571"]
-
-// Cooldown tracking for /info command
-const cooldowns = new Map()
-
-// Express server for HTTP endpoints - CONFIGURED FOR REMOTE ACCESS
+// Express server for HTTP endpoints
 const express = require("express")
 const app = express()
 const PORT = process.env.PORT || 8080
-const SERVER_IP = process.env.SERVER_IP || "98.252.78.88" // Your server IP
 
 // Add CORS middleware to handle cross-origin requests
 app.use((req, res, next) => {
@@ -49,13 +40,13 @@ function generateCode() {
 // Bot ready event
 client.once("ready", () => {
   console.log(`✅ vQuick Bot logged in as ${client.user.tag}!`)
-  console.log(`🔗 HTTP server running on http://${SERVER_IP}:${PORT}`)
+  console.log(`🔗 HTTP server running on port ${PORT}`)
   console.log(`🔍 /checkcode endpoint available for server validation`)
-  console.log(`📡 Test URL: http://${SERVER_IP}:${PORT}/checkcode?code=TEST&hwid=123`)
-  console.log(`🌐 Server accessible at: ${SERVER_IP}:${PORT}`)
+  console.log(`📡 Test URL: http://localhost:${PORT}/checkcode?code=TEST&hwid=123`)
+  console.log(`🔑 Admin role ID: ${ADMIN_ROLE_ID}`)
 })
 
-// ENHANCED: HTTP endpoint for code validation with better logging
+// HTTP endpoint for code validation with better logging
 app.get("/checkcode", (req, res) => {
   const { code, hwid } = req.query
 
@@ -114,7 +105,7 @@ app.get("/checkcode", (req, res) => {
   }
 })
 
-// NEW: Health check endpoint
+// Health check endpoint
 app.get("/health", (req, res) => {
   res.json({
     status: "OK",
@@ -125,7 +116,7 @@ app.get("/health", (req, res) => {
   })
 })
 
-// NEW: Test endpoint for debugging
+// Test endpoint for debugging
 app.get("/test", (req, res) => {
   res.json({
     message: "vQuick Discord Bot Server is running!",
@@ -137,78 +128,23 @@ app.get("/test", (req, res) => {
 
 // Start HTTP server - BIND TO ALL INTERFACES FOR REMOTE ACCESS
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 HTTP server listening on ${SERVER_IP}:${PORT}`)
-  console.log(`🔍 Validation endpoint: http://${SERVER_IP}:${PORT}/checkcode`)
-  console.log(`❤️  Health check: http://${SERVER_IP}:${PORT}/health`)
-  console.log(`🔧 Test endpoint: http://${SERVER_IP}:${PORT}/test`)
-  console.log(`📡 Server accessible from external clients`)
-  console.log(`🔒 CORS enabled for all origins`)
+  console.log(`🌐 HTTP server listening on port ${PORT}`)
+  console.log(`🔍 Validation endpoint: http://localhost:${PORT}/checkcode`)
+  console.log(`❤️  Health check: http://localhost:${PORT}/health`)
+  console.log(`🔧 Test endpoint: http://localhost:${PORT}/test`)
 })
 
 // Slash command interactions
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return
 
-  // Handle commands that are restricted to specific user ID
-  if (["revoke", "listcodes", "stats", "verify"].includes(interaction.commandName)) {
-    if (interaction.user.id !== OWNER_DISCORD_ID) {
-      await interaction.reply({
-        content: "❌ **Access Denied**\n\nYou don't have permission to use this command.",
-        ephemeral: true,
-      })
-      console.log(
-        `🚫 Unauthorized access attempt to ${interaction.commandName} by ${interaction.user.username} (${interaction.user.id})`,
-      )
-      return
-    }
-  }
-
-  // Handle /info command with cooldown and channel restrictions
-  if (interaction.commandName === "info") {
-    // Check if command is used in a restricted channel
-    if (RESTRICTED_CHANNELS.includes(interaction.channelId)) {
-      await interaction.reply({
-        content: "❌ This command cannot be used in this channel.",
-        ephemeral: true,
-      })
-      return
-    }
-
-    // Check for cooldown
-    const now = Date.now()
-    const cooldownTime = 10000 // 10 seconds in milliseconds
-
-    if (cooldowns.has(interaction.user.id)) {
-      const expirationTime = cooldowns.get(interaction.user.id) + cooldownTime
-
-      if (now < expirationTime) {
-        const timeLeft = (expirationTime - now) / 1000
-        await interaction.reply({
-          content: `⏳ Please wait ${timeLeft.toFixed(1)} more seconds before using this command again.`,
-          ephemeral: true,
-        })
-        return
-      }
-    }
-
-    // Set cooldown
-    cooldowns.set(interaction.user.id, now)
-    setTimeout(() => cooldowns.delete(interaction.user.id), cooldownTime)
-
-    // Send info message
+  // OWNER-ONLY CHECK FOR MOST COMMANDS
+  if (interaction.commandName !== "say" && interaction.user.id !== OWNER_DISCORD_ID) {
     await interaction.reply({
-      content: `**Hello! You are interested in vQuick? Here are the payment methods:**
-
-1: Cashapp 
-   - 18+ txpww 
-   - 18- cxshdirty
-
-2: Robux
-   - https://www.roblox.com/game-pass/1257913149/vquick
-
-3: LTC (Litecoin)
-   - You must wait for an owner to respond.`,
+      content: "❌ **Access Denied**\n\nYou're not the owner of this bot. Don't do that!",
+      ephemeral: true,
     })
+    console.log(`🚫 Unauthorized access attempt by ${interaction.user.username} (${interaction.user.id})`)
     return
   }
 
@@ -224,31 +160,25 @@ client.on("interactionCreate", async (interaction) => {
       return
     }
 
+    const channel = interaction.options.getChannel("channel")
     const message = interaction.options.getString("message")
-    const channelId = interaction.options.getChannel("channel").id
 
     try {
-      const channel = await client.channels.fetch(channelId)
       await channel.send(message)
-
       await interaction.reply({
-        content: `✅ Message sent to <#${channelId}> successfully!`,
+        content: `✅ Message sent to ${channel.name}!`,
         ephemeral: true,
       })
-
-      console.log(`📢 Message sent by ${interaction.user.username} to channel ${channelId}`)
     } catch (error) {
-      console.error(`❌ Error sending message to channel ${channelId}:`, error)
       await interaction.reply({
-        content: `❌ Failed to send message: ${error.message}`,
+        content: `❌ Error: ${error.message}`,
         ephemeral: true,
       })
     }
-
     return
   }
 
-  // Get code command - NOW OWNER ONLY
+  // Get code command - OWNER ONLY
   if (interaction.commandName === "getcode") {
     const userId = interaction.user.id
     const username = interaction.user.username
@@ -306,7 +236,7 @@ client.on("interactionCreate", async (interaction) => {
     console.log(`🎫 New code generated: ${newCode} for user ${username} (${userId})`)
   }
 
-  // Verify code command (used by vQuick app) - NOW OWNER ONLY
+  // Verify code command (used by vQuick app) - OWNER ONLY
   if (interaction.commandName === "verify") {
     const code = interaction.options.getString("code")
     const hwid = interaction.options.getString("hwid")
@@ -480,19 +410,13 @@ const commands = [
       option.setName("code").setDescription("The 6-character code to revoke").setRequired(true),
     ),
 
-  // NEW: Say command for users with specific role
   new SlashCommandBuilder()
     .setName("say")
-    .setDescription("Send a message to a specific channel")
-    .addStringOption((option) => option.setName("message").setDescription("The message to send").setRequired(true))
+    .setDescription("Send a message to a channel (Admin role only)")
     .addChannelOption((option) =>
       option.setName("channel").setDescription("The channel to send the message to").setRequired(true),
-    ),
-
-  // NEW: Info command with payment information
-  new SlashCommandBuilder()
-    .setName("info")
-    .setDescription("Get information about vQuick payment methods"),
+    )
+    .addStringOption((option) => option.setName("message").setDescription("The message to send").setRequired(true)),
 ]
 
 const rest = new REST({ version: "10" }).setToken(TOKEN)
