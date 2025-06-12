@@ -42,11 +42,10 @@ client.once("ready", () => {
   console.log(`✅ vQuick Bot logged in as ${client.user.tag}!`)
   console.log(`🔗 HTTP server running on port ${PORT}`)
   console.log(`🔍 /checkcode endpoint available for server validation`)
-  console.log(`📡 Test URL: http://localhost:${PORT}/checkcode?code=TEST&hwid=123`)
   console.log(`🔑 Admin role ID: ${ADMIN_ROLE_ID}`)
 })
 
-// HTTP endpoint for code validation with better logging
+// HTTP endpoint for code validation
 app.get("/checkcode", (req, res) => {
   const { code, hwid } = req.query
 
@@ -89,8 +88,6 @@ app.get("/checkcode", (req, res) => {
       })
     } else {
       console.log(`❌ Server validation failed - HWID mismatch for code ${code}`)
-      console.log(`   Expected: ${codeData.hwid?.substring(0, 8)}...`)
-      console.log(`   Received: ${hwid?.substring(0, 8)}...`)
       return res.json({
         valid: false,
         error: "Code bound to different HWID",
@@ -122,11 +119,10 @@ app.get("/test", (req, res) => {
     message: "vQuick Discord Bot Server is running!",
     port: PORT,
     timestamp: new Date().toISOString(),
-    accessibleFrom: "external clients",
   })
 })
 
-// Start HTTP server - BIND TO ALL INTERFACES FOR REMOTE ACCESS
+// Start HTTP server
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 HTTP server listening on port ${PORT}`)
   console.log(`🔍 Validation endpoint: http://localhost:${PORT}/checkcode`)
@@ -141,7 +137,7 @@ client.on("interactionCreate", async (interaction) => {
   // OWNER-ONLY CHECK FOR MOST COMMANDS
   if (interaction.commandName !== "say" && interaction.user.id !== OWNER_DISCORD_ID) {
     await interaction.reply({
-      content: "❌ **Access Denied**\n\nYou're not the owner of this bot. Don't do that!",
+      content: "❌ **Access Denied**\n\nYou're not the owner of this bot.",
       ephemeral: true,
     })
     console.log(`🚫 Unauthorized access attempt by ${interaction.user.username} (${interaction.user.id})`)
@@ -152,7 +148,7 @@ client.on("interactionCreate", async (interaction) => {
   if (interaction.commandName === "say") {
     // Check if user has the required role
     const member = interaction.member
-    if (!member.roles.cache.has(ADMIN_ROLE_ID)) {
+    if (ADMIN_ROLE_ID !== "0" && !member.roles.cache.has(ADMIN_ROLE_ID)) {
       await interaction.reply({
         content: "❌ **Access Denied**\n\nYou don't have the required role to use this command.",
         ephemeral: true,
@@ -194,13 +190,7 @@ client.on("interactionCreate", async (interaction) => {
 
     if (existingCode) {
       await interaction.reply({
-        content: `✅ **Your existing vQuick authentication code:** \`${existingCode}\`
-
-🔒 **HWID Protection:** This code is permanently bound to the first computer that uses it.
-
-⚠️ **Important:** If you use this code on a different computer, it will be permanently bound to that device instead.
-
-🔍 **Server Validation:** Your access is validated every 30 seconds.`,
+        content: `✅ **Your existing vQuick authentication code:** \`${existingCode}\``,
         ephemeral: true,
       })
       console.log(`🔄 User ${username} requested existing code: ${existingCode}`)
@@ -223,13 +213,7 @@ client.on("interactionCreate", async (interaction) => {
     })
 
     await interaction.reply({
-      content: `✅ **Your vQuick authentication code:** \`${newCode}\`
-
-🔒 **HWID Protection:** This code will be permanently bound to the first computer that uses it.
-
-🔍 **Server Validation:** Your access will be validated every 30 seconds.
-
-⚠️ **Security Notice:** Keep this code private. It cannot be shared between computers.`,
+      content: `✅ **Your vQuick authentication code:** \`${newCode}\``,
       ephemeral: true,
     })
 
@@ -249,28 +233,10 @@ client.on("interactionCreate", async (interaction) => {
       // Check if code is already bound to a different HWID
       if (codeData.hwid && codeData.hwid !== hwid) {
         await interaction.reply({
-          content: `❌ **Code verification failed**
-
-This code is already bound to a different computer. Each code can only be used on one computer.
-
-Please get a new code with \`/getcode\``,
+          content: `❌ **Code verification failed**\n\nThis code is already bound to a different computer.`,
           ephemeral: true,
         })
         console.log(`❌ Code ${code} bound to different HWID`)
-        return
-      }
-
-      // Check if this HWID is already used by another code
-      if (!codeData.hwid && usedHWIDs.has(hwid)) {
-        await interaction.reply({
-          content: `❌ **Computer already has an active code**
-
-This computer is already bound to another authentication code. Each computer can only have one active code.
-
-Contact support if you need to reset your computer's binding.`,
-          ephemeral: true,
-        })
-        console.log(`❌ HWID ${hwid} already in use`)
         return
       }
 
@@ -283,23 +249,14 @@ Contact support if you need to reset your computer's binding.`,
       }
 
       await interaction.reply({
-        content: `✅ **Code verified successfully**
-
-Your vQuick access has been activated on this computer.
-
-🔒 **Security:** This code is now permanently bound to this computer.
-🔍 **Server Validation:** Your access will be validated every 30 seconds.`,
+        content: `✅ **Code verified successfully**\n\nYour vQuick access has been activated on this computer.`,
         ephemeral: true,
       })
 
       console.log(`✅ Code ${code} verified for HWID ${hwid}`)
     } else {
       await interaction.reply({
-        content: `❌ **Invalid or expired code**
-
-The code \`${code}\` is not valid or has been revoked.
-
-Please get a new code with \`/getcode\``,
+        content: `❌ **Invalid or expired code**\n\nThe code \`${code}\` is not valid or has been revoked.`,
         ephemeral: true,
       })
       console.log(`❌ Invalid code verification attempt: ${code}`)
@@ -313,14 +270,7 @@ Please get a new code with \`/getcode\``,
     const boundComputers = usedHWIDs.size
 
     await interaction.reply({
-      content: `📊 **vQuick Bot Statistics**
-
-👥 Unique users: ${totalCodes}
-🎫 Used codes: ${usedCodes}
-💻 Bound computers: ${boundComputers}
-🔒 HWID protection: ENABLED
-🔍 Server validation: ACTIVE (Port ${PORT})
-📡 External access: ENABLED`,
+      content: `📊 **vQuick Bot Statistics**\n\n👥 Unique users: ${totalCodes}\n🎫 Used codes: ${usedCodes}\n💻 Bound computers: ${boundComputers}`,
       ephemeral: true,
     })
   }
@@ -372,10 +322,7 @@ Please get a new code with \`/getcode\``,
       activeCodes.delete(codeToRevoke)
 
       await interaction.reply({
-        content: `✅ **Code revoked:** \`${codeToRevoke}\` (was owned by ${userData.username})
-${userData.hwid ? `🔓 Computer unbound and available for new codes` : ""}
-
-🔍 **Server Validation:** Users with this code will be automatically logged out within 30 seconds.`,
+        content: `✅ **Code revoked:** \`${codeToRevoke}\` (was owned by ${userData.username})`,
         ephemeral: true,
       })
 
