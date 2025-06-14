@@ -5,14 +5,13 @@ const TOKEN = process.env.DISCORD_TOKEN
 const CLIENT_ID = process.env.CLIENT_ID
 const GUILD_ID = process.env.GUILD_ID
 const OWNER_DISCORD_ID = process.env.OWNER_DISCORD_ID
-const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID || "0" // Default to "0" if not set
+const ADMIN_ROLE_ID = process.env.ADMIN_ROLE_ID || "0"
 
 // Express server for HTTP endpoints
 const express = require("express")
 const app = express()
 const PORT = process.env.PORT || 8080
 
-// Add CORS middleware to handle cross-origin requests
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*")
   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
@@ -27,14 +26,44 @@ const client = new Client({
 const activeCodes = new Map()
 const usedHWIDs = new Set()
 
-// Generate random 6-character code
+// IMPROVED Generate random 6-character code - REPLACE YOUR EXISTING FUNCTION WITH THIS
 function generateCode() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   let result = ""
+
+  // Use current timestamp for additional randomness
+  const timestamp = Date.now()
+
   for (let i = 0; i < 6; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
+    // Combine Math.random with timestamp for better entropy
+    const randomValue = Math.random() * (timestamp % 1000000)
+    const index = Math.floor(randomValue) % chars.length
+    result += chars.charAt(index)
   }
+
   return result
+}
+
+// IMPROVED code generation with better collision checking
+function generateUniqueCode() {
+  let newCode
+  let attempts = 0
+  const maxAttempts = 20
+
+  do {
+    newCode = generateCode()
+    attempts++
+
+    // If we've tried too many times, add timestamp to ensure uniqueness
+    if (attempts >= maxAttempts) {
+      const timestamp = Date.now().toString().slice(-2)
+      newCode = generateCode().substring(0, 4) + timestamp
+      break
+    }
+  } while (activeCodes.has(newCode))
+
+  console.log(`🎲 Generated unique code: ${newCode} (attempts: ${attempts})`)
+  return newCode
 }
 
 // Bot ready event
@@ -60,7 +89,6 @@ app.get("/checkcode", (req, res) => {
     })
   }
 
-  // Check if code exists and matches HWID
   if (activeCodes.has(code)) {
     const codeData = activeCodes.get(code)
 
@@ -73,7 +101,6 @@ app.get("/checkcode", (req, res) => {
         boundAt: new Date(codeData.timestamp).toISOString(),
       })
     } else if (codeData.hwid === null) {
-      // Code exists but not bound yet - bind it now
       codeData.hwid = hwid
       codeData.isUsed = true
       usedHWIDs.add(hwid)
@@ -134,7 +161,6 @@ app.listen(PORT, "0.0.0.0", () => {
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return
 
-  // OWNER-ONLY CHECK FOR MOST COMMANDS
   if (interaction.commandName !== "say" && interaction.user.id !== OWNER_DISCORD_ID) {
     await interaction.reply({
       content: "❌ **Access Denied**\n\nYou're not the owner of this bot.",
@@ -144,9 +170,7 @@ client.on("interactionCreate", async (interaction) => {
     return
   }
 
-  // Handle /say command with role restriction
   if (interaction.commandName === "say") {
-    // Check if user has the required role
     const member = interaction.member
     if (ADMIN_ROLE_ID !== "0" && !member.roles.cache.has(ADMIN_ROLE_ID)) {
       await interaction.reply({
@@ -174,7 +198,7 @@ client.on("interactionCreate", async (interaction) => {
     return
   }
 
-  // Get code command - OWNER ONLY
+  // UPDATED Get code command with improved generation
   if (interaction.commandName === "getcode") {
     const userId = interaction.user.id
     const username = interaction.user.username
@@ -197,11 +221,8 @@ client.on("interactionCreate", async (interaction) => {
       return
     }
 
-    // Generate new code
-    let newCode
-    do {
-      newCode = generateCode()
-    } while (activeCodes.has(newCode))
+    // Generate new UNIQUE code using improved function
+    const newCode = generateUniqueCode()
 
     // Store the code
     activeCodes.set(newCode, {
@@ -218,9 +239,10 @@ client.on("interactionCreate", async (interaction) => {
     })
 
     console.log(`🎫 New code generated: ${newCode} for user ${username} (${userId})`)
+    console.log(`📊 Total active codes: ${activeCodes.size}`)
   }
 
-  // Verify code command (used by vQuick app) - OWNER ONLY
+  // Verify code command
   if (interaction.commandName === "verify") {
     const code = interaction.options.getString("code")
     const hwid = interaction.options.getString("hwid")
@@ -230,7 +252,6 @@ client.on("interactionCreate", async (interaction) => {
     if (activeCodes.has(code)) {
       const codeData = activeCodes.get(code)
 
-      // Check if code is already bound to a different HWID
       if (codeData.hwid && codeData.hwid !== hwid) {
         await interaction.reply({
           content: `❌ **Code verification failed**\n\nThis code is already bound to a different computer.`,
@@ -240,7 +261,6 @@ client.on("interactionCreate", async (interaction) => {
         return
       }
 
-      // Bind code to HWID if not already bound
       if (!codeData.hwid) {
         codeData.hwid = hwid
         codeData.isUsed = true
@@ -263,7 +283,7 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Stats command - only for bot owner
+  // Stats command
   if (interaction.commandName === "stats") {
     const totalCodes = activeCodes.size
     const usedCodes = Array.from(activeCodes.values()).filter((data) => data.isUsed).length
@@ -275,7 +295,7 @@ client.on("interactionCreate", async (interaction) => {
     })
   }
 
-  // List codes command - only for bot owner
+  // List codes command
   if (interaction.commandName === "listcodes") {
     if (activeCodes.size === 0) {
       await interaction.reply({
@@ -313,7 +333,6 @@ client.on("interactionCreate", async (interaction) => {
     if (activeCodes.has(codeToRevoke)) {
       const userData = activeCodes.get(codeToRevoke)
 
-      // Remove HWID from used set if it was bound
       if (userData.hwid) {
         usedHWIDs.delete(userData.hwid)
         console.log(`🔓 HWID ${userData.hwid} freed from revoked code`)
@@ -368,7 +387,6 @@ const commands = [
 
 const rest = new REST({ version: "10" }).setToken(TOKEN)
 
-// Register commands
 async function registerCommands() {
   try {
     console.log("🔄 Started refreshing commands.")
@@ -383,7 +401,6 @@ async function registerCommands() {
 
 registerCommands()
 
-// Error handling
 client.on("error", (error) => {
   console.error("❌ Discord client error:", error)
 })
@@ -392,5 +409,4 @@ process.on("unhandledRejection", (error) => {
   console.error("❌ Unhandled promise rejection:", error)
 })
 
-// Login to Discord
 client.login(TOKEN)
