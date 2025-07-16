@@ -23,6 +23,7 @@ const client = new Client({
 })
 
 // In-memory storage for active codes
+const userCooldowns = new Map();
 const activeCodes = new Map()
 const usedHWIDs = new Set()
 
