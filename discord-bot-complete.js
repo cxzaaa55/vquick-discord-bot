@@ -206,10 +206,7 @@ client.on("interactionCreate", async (interaction) => {
 
     
 // Remove old code if user has one
-for (const [code, data] of activeCodes.entries()) {
-  if (data.userId === userId) {
-    activeCodes.delete(code)
-    console.log(`♻️ Old code ${code} removed for user ${username}`)
+ removed for user ${username}`)
     break
   }
 }
@@ -301,9 +298,7 @@ for (const [code, data] of activeCodes.entries()) {
 
     let codeList = "📝 **Active Authentication Codes:**\n```\n"
     let count = 0
-    for (const [code, data] of activeCodes.entries()) {
-      if (count >= 10) {
-        codeList += `... and ${activeCodes.size - 10} more\n`
+     more\n`
         break
       }
       const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
