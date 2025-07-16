@@ -204,23 +204,16 @@ client.on("interactionCreate", async (interaction) => {
     const userId = interaction.user.id
     const username = interaction.user.username
 
-    // Check if user already has an active code
-    let existingCode = null
-    for (const [code, data] of activeCodes.entries()) {
-      if (data.userId === userId) {
-        existingCode = code
-        break
-      }
-    }
+    
+// Remove old code if user has one
+for (const [code, data] of activeCodes.entries()) {
+  if (data.userId === userId) {
+    activeCodes.delete(code)
+    console.log(`♻️ Old code ${code} removed for user ${username}`)
+    break
+  }
+}
 
-    if (existingCode) {
-      await interaction.reply({
-        content: `✅ **Your existing vQuick authentication code:** \`${existingCode}\``,
-        ephemeral: true,
-      })
-      console.log(`🔄 User ${username} requested existing code: ${existingCode}`)
-      return
-    }
 
     // Generate new UNIQUE code using improved function
     const newCode = generateUniqueCode()
