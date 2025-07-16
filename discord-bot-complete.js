@@ -24,7 +24,7 @@ const client = new Client({
 
 // In-memory storage for active codes
 const userCooldowns = new Map();
-const 
+const activeCodes = new Map()
 const usedHWIDs = new Set()
 
 // IMPROVED Generate random 6-character code - REPLACE YOUR EXISTING FUNCTION WITH THIS
