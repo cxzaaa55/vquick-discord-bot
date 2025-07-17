@@ -23,11 +23,11 @@ const client = new Client({
 })
 
 // In-memory storage for active codes
-const userCooldowns = new Map();
+const userCooldowns = new Map()
 const activeCodes = new Map()
 const usedHWIDs = new Set()
 
-// IMPROVED Generate random 6-character code - REPLACE YOUR EXISTING FUNCTION WITH THIS
+// IMPROVED Generate random 6-character code
 function generateCode() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
   let result = ""
@@ -199,20 +199,34 @@ client.on("interactionCreate", async (interaction) => {
     return
   }
 
-  // UPDATED Get code command with improved generation
+  // FIXED Get code command - removed the incomplete code block that was causing issues
   if (interaction.commandName === "getcode") {
     const userId = interaction.user.id
     const username = interaction.user.username
 
-    
-// ✅ Code deletion logic removed. Users can now have multiple active codes.
-}
+    // Check cooldown (optional - you can adjust or remove this)
+    const now = Date.now()
+    const cooldownTime = 5000 // 5 seconds between code generations
 
+    if (userCooldowns.has(userId)) {
+      const expirationTime = userCooldowns.get(userId) + cooldownTime
+      if (now < expirationTime) {
+        const timeLeft = Math.ceil((expirationTime - now) / 1000)
+        await interaction.reply({
+          content: `⏰ **Cooldown active**\n\nPlease wait ${timeLeft} seconds before generating another code.`,
+          ephemeral: true,
+        })
+        return
+      }
+    }
+
+    // Set cooldown
+    userCooldowns.set(userId, now)
 
     // Generate new UNIQUE code using improved function
     const newCode = generateUniqueCode()
 
-    // Store the code
+    // Store the code (this is the key fix - we're NOT deleting previous codes)
     activeCodes.set(newCode, {
       userId: userId,
       username: username,
@@ -228,6 +242,12 @@ client.on("interactionCreate", async (interaction) => {
 
     console.log(`🎫 New code generated: ${newCode} for user ${username} (${userId})`)
     console.log(`📊 Total active codes: ${activeCodes.size}`)
+
+    // Log all codes for this user for debugging
+    const userCodes = Array.from(activeCodes.entries())
+      .filter(([code, data]) => data.userId === userId)
+      .map(([code]) => code)
+    console.log(`👤 User ${username} now has ${userCodes.length} active codes: ${userCodes.join(", ")}`)
   }
 
   // Verify code command
@@ -277,13 +297,16 @@ client.on("interactionCreate", async (interaction) => {
     const usedCodes = Array.from(activeCodes.values()).filter((data) => data.isUsed).length
     const boundComputers = usedHWIDs.size
 
+    // Count unique users
+    const uniqueUsers = new Set(Array.from(activeCodes.values()).map((data) => data.userId)).size
+
     await interaction.reply({
-      content: `📊 **vQuick Bot Statistics**\n\n👥 Unique users: ${totalCodes}\n🎫 Used codes: ${usedCodes}\n💻 Bound computers: ${boundComputers}`,
+      content: `📊 **vQuick Bot Statistics**\n\n👥 Unique users: ${uniqueUsers}\n🎫 Total active codes: ${totalCodes}\n🔒 Used codes: ${usedCodes}\n💻 Bound computers: ${boundComputers}`,
       ephemeral: true,
     })
   }
 
-  // List codes command
+  // IMPROVED List codes command - now shows ALL codes properly
   if (interaction.commandName === "listcodes") {
     if (activeCodes.size === 0) {
       await interaction.reply({
@@ -293,20 +316,41 @@ client.on("interactionCreate", async (interaction) => {
       return
     }
 
-    let codeList = "📝 **Active Authentication Codes:**\n```\n"
+    // Sort codes by timestamp (newest first)
+    const sortedCodes = Array.from(activeCodes.entries()).sort(([, a], [, b]) => b.timestamp - a.timestamp)
+
+    let codeList = `📝 **Active Authentication Codes (${activeCodes.size} total):**\n\`\`\`\n`
     let count = 0
-    for (const [code, data] of activeCodes.entries()) {
-      if (count >= 10) {
-        codeList += `... and ${activeCodes.size - 10} more\n`
+
+    for (const [code, data] of sortedCodes) {
+      if (count >= 15) {
+        // Show more codes in the list
+        codeList += `... and ${activeCodes.size - 15} more\n`
         break
       }
+
       const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
       const status = data.isUsed ? `🔒 BOUND` : `🔓 FREE`
       const hwidInfo = data.hwid ? ` (${data.hwid.substring(0, 8)}...)` : ``
+
       codeList += `${code} - ${data.username} (${timeAgo}m ago) ${status}${hwidInfo}\n`
       count++
     }
     codeList += "```"
+
+    // Add summary by user
+    const userCodeCounts = new Map()
+    for (const [code, data] of activeCodes.entries()) {
+      const current = userCodeCounts.get(data.username) || 0
+      userCodeCounts.set(data.username, current + 1)
+    }
+
+    if (userCodeCounts.size > 1) {
+      codeList += "\n📊 **Codes per user:**\n"
+      for (const [username, count] of userCodeCounts.entries()) {
+        codeList += `• ${username}: ${count} codes\n`
+      }
+    }
 
     await interaction.reply({
       content: codeList,
@@ -341,6 +385,40 @@ client.on("interactionCreate", async (interaction) => {
       })
     }
   }
+
+  // NEW: Revoke all codes for a user
+  if (interaction.commandName === "revokeuser") {
+    const targetUser = interaction.options.getString("username")
+
+    const userCodes = Array.from(activeCodes.entries()).filter(
+      ([code, data]) => data.username.toLowerCase() === targetUser.toLowerCase(),
+    )
+
+    if (userCodes.length === 0) {
+      await interaction.reply({
+        content: `❌ **No codes found for user:** ${targetUser}`,
+        ephemeral: true,
+      })
+      return
+    }
+
+    // Revoke all codes for this user
+    let revokedCount = 0
+    for (const [code, data] of userCodes) {
+      if (data.hwid) {
+        usedHWIDs.delete(data.hwid)
+      }
+      activeCodes.delete(code)
+      revokedCount++
+    }
+
+    await interaction.reply({
+      content: `✅ **Revoked ${revokedCount} codes for user:** ${targetUser}`,
+      ephemeral: true,
+    })
+
+    console.log(`🗑️ Revoked ${revokedCount} codes for user ${targetUser}`)
+  }
 })
 
 // Register slash commands
@@ -362,6 +440,13 @@ const commands = [
     .setDescription("Revoke a specific authentication code (Owner only)")
     .addStringOption((option) =>
       option.setName("code").setDescription("The 6-character code to revoke").setRequired(true),
+    ),
+
+  new SlashCommandBuilder()
+    .setName("revokeuser")
+    .setDescription("Revoke all codes for a specific user (Owner only)")
+    .addStringOption((option) =>
+      option.setName("username").setDescription("The username to revoke all codes for").setRequired(true),
     ),
 
   new SlashCommandBuilder()
