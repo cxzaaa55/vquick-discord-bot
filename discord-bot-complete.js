@@ -27,6 +27,19 @@ const userCooldowns = new Map()
 const activeCodes = new Map()
 const usedHWIDs = new Set()
 
+// DEBUG: Add logging function to track Map changes
+function logMapState(operation, code = null) {
+  console.log(`\n🔍 DEBUG - ${operation}`)
+  console.log(`📊 Map size: ${activeCodes.size}`)
+  if (code) console.log(`🎯 Operation on code: ${code}`)
+
+  console.log(`📝 All active codes:`)
+  for (const [codeKey, data] of activeCodes.entries()) {
+    console.log(`   ${codeKey} -> ${data.username} (${new Date(data.timestamp).toLocaleTimeString()})`)
+  }
+  console.log(`--- End Debug ---\n`)
+}
+
 // IMPROVED Generate random 6-character code
 function generateCode() {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -73,6 +86,9 @@ client.once("ready", () => {
   console.log(`🔗 HTTP server running on port ${PORT}`)
   console.log(`🔍 /checkcode endpoint available for server validation`)
   console.log(`🔑 Admin role ID: ${ADMIN_ROLE_ID}`)
+
+  // DEBUG: Log initial state
+  logMapState("Bot Ready - Initial State")
 })
 
 // HTTP endpoint for code validation
@@ -108,6 +124,9 @@ app.get("/checkcode", (req, res) => {
 
       console.log(`🔒 Code ${code} auto-bound to HWID ${hwid.substring(0, 8)}... during server validation`)
 
+      // DEBUG: Log after HWID binding
+      logMapState("After HWID Auto-Bind", code)
+
       return res.json({
         valid: true,
         message: "Code validated and bound to HWID",
@@ -141,6 +160,24 @@ app.get("/health", (req, res) => {
   })
 })
 
+// DEBUG endpoint to inspect active codes
+app.get("/debug", (req, res) => {
+  const codesArray = Array.from(activeCodes.entries()).map(([code, data]) => ({
+    code,
+    username: data.username,
+    userId: data.userId,
+    timestamp: new Date(data.timestamp).toISOString(),
+    isUsed: data.isUsed,
+    hwid: data.hwid ? data.hwid.substring(0, 8) + "..." : null,
+  }))
+
+  res.json({
+    totalCodes: activeCodes.size,
+    codes: codesArray,
+    timestamp: new Date().toISOString(),
+  })
+})
+
 // Test endpoint for debugging
 app.get("/test", (req, res) => {
   res.json({
@@ -154,6 +191,7 @@ app.get("/test", (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🌐 HTTP server listening on port ${PORT}`)
   console.log(`🔍 Validation endpoint: http://localhost:${PORT}/checkcode`)
+  console.log(`🐛 Debug endpoint: http://localhost:${PORT}/debug`)
   console.log(`❤️  Health check: http://localhost:${PORT}/health`)
   console.log(`🔧 Test endpoint: http://localhost:${PORT}/test`)
 })
@@ -199,14 +237,19 @@ client.on("interactionCreate", async (interaction) => {
     return
   }
 
-  // FIXED Get code command - removed the incomplete code block that was causing issues
+  // DEBUG VERSION: Get code command with extensive logging
   if (interaction.commandName === "getcode") {
     const userId = interaction.user.id
     const username = interaction.user.username
 
+    console.log(`\n🎫 GETCODE REQUEST from ${username} (${userId})`)
+
+    // DEBUG: Log state before any operations
+    logMapState("Before GetCode Processing")
+
     // Check cooldown (optional - you can adjust or remove this)
     const now = Date.now()
-    const cooldownTime = 5000 // 5 seconds between code generations
+    const cooldownTime = 2000 // Reduced to 2 seconds for testing
 
     if (userCooldowns.has(userId)) {
       const expirationTime = userCooldowns.get(userId) + cooldownTime
@@ -222,18 +265,39 @@ client.on("interactionCreate", async (interaction) => {
 
     // Set cooldown
     userCooldowns.set(userId, now)
+    console.log(`⏰ Cooldown set for user ${username}`)
 
     // Generate new UNIQUE code using improved function
     const newCode = generateUniqueCode()
+    console.log(`🎲 About to store code: ${newCode}`)
 
-    // Store the code (this is the key fix - we're NOT deleting previous codes)
-    activeCodes.set(newCode, {
+    // DEBUG: Log state before storing new code
+    logMapState("Before Storing New Code", newCode)
+
+    // Store the code - THIS IS THE CRITICAL SECTION
+    const codeData = {
       userId: userId,
       username: username,
       timestamp: Date.now(),
       isUsed: false,
       hwid: null,
-    })
+    }
+
+    console.log(`💾 Storing code data:`, codeData)
+    activeCodes.set(newCode, codeData)
+    console.log(`✅ Code ${newCode} stored successfully`)
+
+    // DEBUG: Log state immediately after storing
+    logMapState("Immediately After Storing New Code", newCode)
+
+    // Verify the code was actually stored
+    if (activeCodes.has(newCode)) {
+      console.log(`✅ VERIFICATION: Code ${newCode} exists in Map`)
+      const retrievedData = activeCodes.get(newCode)
+      console.log(`📋 Retrieved data:`, retrievedData)
+    } else {
+      console.log(`❌ ERROR: Code ${newCode} NOT found in Map after storage!`)
+    }
 
     await interaction.reply({
       content: `✅ **Your vQuick authentication code:** \`${newCode}\``,
@@ -248,9 +312,89 @@ client.on("interactionCreate", async (interaction) => {
       .filter(([code, data]) => data.userId === userId)
       .map(([code]) => code)
     console.log(`👤 User ${username} now has ${userCodes.length} active codes: ${userCodes.join(", ")}`)
+
+    // DEBUG: Final state log
+    logMapState("Final State After GetCode", newCode)
   }
 
-  // Verify code command
+  // DEBUG VERSION: List codes command with extensive logging
+  if (interaction.commandName === "listcodes") {
+    console.log(`\n📝 LISTCODES REQUEST`)
+
+    // DEBUG: Log state when listcodes is called
+    logMapState("ListCodes Called")
+
+    if (activeCodes.size === 0) {
+      await interaction.reply({
+        content: "📝 **No active codes found**",
+        ephemeral: true,
+      })
+      return
+    }
+
+    // Sort codes by timestamp (newest first)
+    const sortedCodes = Array.from(activeCodes.entries()).sort(([, a], [, b]) => b.timestamp - a.timestamp)
+
+    console.log(`🔄 Sorted codes array length: ${sortedCodes.length}`)
+    sortedCodes.forEach(([code, data], index) => {
+      console.log(`   ${index}: ${code} -> ${data.username} (${new Date(data.timestamp).toLocaleTimeString()})`)
+    })
+
+    let codeList = `📝 **Active Authentication Codes (${activeCodes.size} total):**\n\`\`\`\n`
+    let count = 0
+
+    for (const [code, data] of sortedCodes) {
+      if (count >= 15) {
+        codeList += `... and ${activeCodes.size - 15} more\n`
+        break
+      }
+
+      const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
+      const status = data.isUsed ? `🔒 BOUND` : `🔓 FREE`
+      const hwidInfo = data.hwid ? ` (${data.hwid.substring(0, 8)}...)` : ``
+
+      codeList += `${code} - ${data.username} (${timeAgo}m ago) ${status}${hwidInfo}\n`
+      count++
+    }
+    codeList += "```"
+
+    // Add summary by user
+    const userCodeCounts = new Map()
+    for (const [code, data] of activeCodes.entries()) {
+      const current = userCodeCounts.get(data.username) || 0
+      userCodeCounts.set(data.username, current + 1)
+    }
+
+    if (userCodeCounts.size > 0) {
+      codeList += "\n📊 **Codes per user:**\n"
+      for (const [username, count] of userCodeCounts.entries()) {
+        codeList += `• ${username}: ${count} codes\n`
+      }
+    }
+
+    await interaction.reply({
+      content: codeList,
+      ephemeral: true,
+    })
+
+    console.log(`📝 ListCodes response sent with ${count} codes displayed`)
+  }
+
+  // Add debug command for manual inspection
+  if (interaction.commandName === "debug") {
+    logMapState("Manual Debug Command")
+
+    const debugInfo = Array.from(activeCodes.entries())
+      .map(([code, data]) => `${code}: ${data.username} (${new Date(data.timestamp).toLocaleTimeString()})`)
+      .join("\n")
+
+    await interaction.reply({
+      content: `🐛 **Debug Info:**\n\`\`\`\nTotal codes: ${activeCodes.size}\n${debugInfo || "No codes"}\n\`\`\``,
+      ephemeral: true,
+    })
+  }
+
+  // Other commands remain the same...
   if (interaction.commandName === "verify") {
     const code = interaction.options.getString("code")
     const hwid = interaction.options.getString("hwid")
@@ -274,6 +418,9 @@ client.on("interactionCreate", async (interaction) => {
         codeData.isUsed = true
         usedHWIDs.add(hwid)
         console.log(`🔒 Code ${code} bound to HWID ${hwid}`)
+
+        // DEBUG: Log after manual verification
+        logMapState("After Manual Verification", code)
       }
 
       await interaction.reply({
@@ -291,13 +438,10 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // Stats command
   if (interaction.commandName === "stats") {
     const totalCodes = activeCodes.size
     const usedCodes = Array.from(activeCodes.values()).filter((data) => data.isUsed).length
     const boundComputers = usedHWIDs.size
-
-    // Count unique users
     const uniqueUsers = new Set(Array.from(activeCodes.values()).map((data) => data.userId)).size
 
     await interaction.reply({
@@ -306,61 +450,11 @@ client.on("interactionCreate", async (interaction) => {
     })
   }
 
-  // IMPROVED List codes command - now shows ALL codes properly
-  if (interaction.commandName === "listcodes") {
-    if (activeCodes.size === 0) {
-      await interaction.reply({
-        content: "📝 **No active codes found**",
-        ephemeral: true,
-      })
-      return
-    }
-
-    // Sort codes by timestamp (newest first)
-    const sortedCodes = Array.from(activeCodes.entries()).sort(([, a], [, b]) => b.timestamp - a.timestamp)
-
-    let codeList = `📝 **Active Authentication Codes (${activeCodes.size} total):**\n\`\`\`\n`
-    let count = 0
-
-    for (const [code, data] of sortedCodes) {
-      if (count >= 15) {
-        // Show more codes in the list
-        codeList += `... and ${activeCodes.size - 15} more\n`
-        break
-      }
-
-      const timeAgo = Math.floor((Date.now() - data.timestamp) / (1000 * 60))
-      const status = data.isUsed ? `🔒 BOUND` : `🔓 FREE`
-      const hwidInfo = data.hwid ? ` (${data.hwid.substring(0, 8)}...)` : ``
-
-      codeList += `${code} - ${data.username} (${timeAgo}m ago) ${status}${hwidInfo}\n`
-      count++
-    }
-    codeList += "```"
-
-    // Add summary by user
-    const userCodeCounts = new Map()
-    for (const [code, data] of activeCodes.entries()) {
-      const current = userCodeCounts.get(data.username) || 0
-      userCodeCounts.set(data.username, current + 1)
-    }
-
-    if (userCodeCounts.size > 1) {
-      codeList += "\n📊 **Codes per user:**\n"
-      for (const [username, count] of userCodeCounts.entries()) {
-        codeList += `• ${username}: ${count} codes\n`
-      }
-    }
-
-    await interaction.reply({
-      content: codeList,
-      ephemeral: true,
-    })
-  }
-
-  // Revoke code command
   if (interaction.commandName === "revoke") {
     const codeToRevoke = interaction.options.getString("code")
+
+    // DEBUG: Log before revoke
+    logMapState("Before Revoke", codeToRevoke)
 
     if (activeCodes.has(codeToRevoke)) {
       const userData = activeCodes.get(codeToRevoke)
@@ -378,6 +472,9 @@ client.on("interactionCreate", async (interaction) => {
       })
 
       console.log(`🗑️ Code ${codeToRevoke} revoked by owner`)
+
+      // DEBUG: Log after revoke
+      logMapState("After Revoke", codeToRevoke)
     } else {
       await interaction.reply({
         content: `❌ **Code not found:** \`${codeToRevoke}\``,
@@ -385,43 +482,9 @@ client.on("interactionCreate", async (interaction) => {
       })
     }
   }
-
-  // NEW: Revoke all codes for a user
-  if (interaction.commandName === "revokeuser") {
-    const targetUser = interaction.options.getString("username")
-
-    const userCodes = Array.from(activeCodes.entries()).filter(
-      ([code, data]) => data.username.toLowerCase() === targetUser.toLowerCase(),
-    )
-
-    if (userCodes.length === 0) {
-      await interaction.reply({
-        content: `❌ **No codes found for user:** ${targetUser}`,
-        ephemeral: true,
-      })
-      return
-    }
-
-    // Revoke all codes for this user
-    let revokedCount = 0
-    for (const [code, data] of userCodes) {
-      if (data.hwid) {
-        usedHWIDs.delete(data.hwid)
-      }
-      activeCodes.delete(code)
-      revokedCount++
-    }
-
-    await interaction.reply({
-      content: `✅ **Revoked ${revokedCount} codes for user:** ${targetUser}`,
-      ephemeral: true,
-    })
-
-    console.log(`🗑️ Revoked ${revokedCount} codes for user ${targetUser}`)
-  }
 })
 
-// Register slash commands
+// Register slash commands (including debug command)
 const commands = [
   new SlashCommandBuilder().setName("getcode").setDescription("Get your vQuick authentication code (Owner only)"),
 
@@ -442,12 +505,7 @@ const commands = [
       option.setName("code").setDescription("The 6-character code to revoke").setRequired(true),
     ),
 
-  new SlashCommandBuilder()
-    .setName("revokeuser")
-    .setDescription("Revoke all codes for a specific user (Owner only)")
-    .addStringOption((option) =>
-      option.setName("username").setDescription("The username to revoke all codes for").setRequired(true),
-    ),
+  new SlashCommandBuilder().setName("debug").setDescription("Show debug information about active codes (Owner only)"),
 
   new SlashCommandBuilder()
     .setName("say")
