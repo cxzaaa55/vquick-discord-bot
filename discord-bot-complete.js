@@ -205,13 +205,7 @@ client.on("interactionCreate", async (interaction) => {
     const username = interaction.user.username
 
     
-// Remove old code if user has one
-for (const [code, data] of activeCodes.entries()) {
-  if (data.userId === userId) {
-    activeCodes.delete(code)
-    console.log(`♻️ Old code ${code} removed for user ${username}`)
-    break
-  }
+// ✅ Code deletion logic removed. Users can now have multiple active codes.
 }
 
 
